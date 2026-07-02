@@ -14,10 +14,14 @@ if (!$backupDir || !is_dir($backupDir)) {
     die("Backup folder not found.\n");
 }
 
-if (!is_dir($outputDir)) {
-    mkdir($outputDir, 0777, true);
+if (!is_dir($outputDir) && !mkdir($outputDir, 0777, true) && !is_dir($outputDir)) {
+    die("Cannot create output folder.\n");
 }
 $outputDir = realpath($outputDir);
+
+if ($outputDir === false) {
+    die("Cannot resolve output folder.\n");
+}
 
 $filesXmlPath = $backupDir . DIRECTORY_SEPARATOR . 'files.xml';
 $filesDir = $backupDir . DIRECTORY_SEPARATOR . 'files';
