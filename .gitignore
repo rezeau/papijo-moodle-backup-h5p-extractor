@@ -1,0 +1,11 @@
+# Temporary folders
+temp/
+output/
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
