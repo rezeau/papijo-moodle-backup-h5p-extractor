@@ -138,15 +138,25 @@ foreach ($hvpXmlFiles as $hvpXmlFile) {
         ],
     ];
 
-    $zip->addFromString(
-        'h5p.json',
-        json_encode($h5pJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-    );
+    $encodedH5pJson = json_encode($h5pJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
-    $zip->addFromString(
-        'content/content.json',
-        $jsonContent
-    );
+    if ($encodedH5pJson === false) {
+        echo "Cannot encode h5p.json for item $itemid / $title: " . json_last_error_msg() . "\n";
+        $zip->close();
+        continue;
+    }
+
+    if (!$zip->addFromString('h5p.json', $encodedH5pJson)) {
+        echo "Cannot add h5p.json to: $target\n";
+        $zip->close();
+        continue;
+    }
+
+    if (!$zip->addFromString('content/content.json', $jsonContent)) {
+        echo "Cannot add content/content.json to: $target\n";
+        $zip->close();
+        continue;
+    }
 
     $addedMedia = 0;
 
@@ -170,10 +180,15 @@ foreach ($hvpXmlFiles as $hvpXmlFile) {
 
         if ($zip->addFile($source, $internalPath)) {
             $addedMedia++;
+        } else {
+            echo "Cannot add media file for item $itemid: $internalPath\n";
         }
     }
 
-    $zip->close();
+    if (!$zip->close()) {
+        echo "Cannot finalize: $target\n";
+        continue;
+    }
 
     echo "Created OK: $target ($addedMedia media files)\n";
     $count++;
