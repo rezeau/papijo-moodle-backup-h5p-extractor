@@ -27,9 +27,17 @@ $filesXmlPath = $backupDir . DIRECTORY_SEPARATOR . 'files.xml';
 $filesDir = $backupDir . DIRECTORY_SEPARATOR . 'files';
 $activitiesDir = $backupDir . DIRECTORY_SEPARATOR . 'activities';
 
-if (!is_file($filesXmlPath)) die("files.xml not found.\n");
-if (!is_dir($filesDir)) die("files folder not found.\n");
-if (!is_dir($activitiesDir)) die("activities folder not found.\n");
+if (!is_file($filesXmlPath)) {
+    die("files.xml not found.\n");
+}
+
+if (!is_dir($filesDir)) {
+    die("files folder not found.\n");
+}
+
+if (!is_dir($activitiesDir)) {
+    die("activities folder not found.\n");
+}
 
 $filesXml = simplexml_load_file($filesXmlPath);
 
@@ -48,9 +56,17 @@ foreach ($filesXml->file as $file) {
     $contenthash = (string) $file->contenthash;
     $filesize = (int) $file->filesize;
 
-    if ($component !== 'mod_hvp') continue;
-    if ($filearea !== 'content') continue;
-    if ($filename === '.' || $filename === '' || $filesize === 0) continue;
+    if ($component !== 'mod_hvp') {
+        continue;
+    }
+
+    if ($filearea !== 'content') {
+        continue;
+    }
+
+    if ($filename === '.' || $filename === '' || $filesize === 0) {
+        continue;
+    }
 
     $mediaByItem[$itemid][] = [
         'filename' => $filename,
@@ -70,7 +86,9 @@ foreach ($hvpXmlFiles as $hvpXmlFile) {
         continue;
     }
 
-    if (!isset($activity->hvp)) continue;
+    if (!isset($activity->hvp)) {
+        continue;
+    }
 
     $hvp = $activity->hvp;
 
