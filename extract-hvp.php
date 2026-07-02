@@ -80,12 +80,12 @@ foreach ($hvpXmlFiles as $hvpXmlFile) {
     $major = (int) $hvp->major_version;
     $minor = (int) $hvp->minor_version;
     $jsonContent = (string) $hvp->json_content;
-json_decode($jsonContent);
+    json_decode($jsonContent);
 
-if (json_last_error() !== JSON_ERROR_NONE) {
-    echo "Invalid JSON for item $itemid / $title: " . json_last_error_msg() . "\n";
-    continue;
-}
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        echo "Invalid JSON for item $itemid / $title: " . json_last_error_msg() . "\n";
+        continue;
+    }
     if ($itemid === '' || $machineName === '' || $jsonContent === '') {
         echo "Skipping incomplete HVP activity: $hvpXmlFile\n";
         continue;
