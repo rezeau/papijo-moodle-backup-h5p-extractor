@@ -1,6 +1,6 @@
 <?php
 if ($argc < 3) {
-    die("Usage: php extract-hvp-from-moodle-backup.php extracted_backup_folder output_folder\n");
+    die("Usage: php extract-hvp.php extracted_backup_folder output_folder\n");
 }
 
 $backupDir = realpath($argv[1]);
