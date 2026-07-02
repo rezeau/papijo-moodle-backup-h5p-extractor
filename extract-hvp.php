@@ -3,6 +3,10 @@ if ($argc < 3) {
     die("Usage: php extract-hvp.php extracted_backup_folder output_folder\n");
 }
 
+if (!class_exists('ZipArchive')) {
+    die("PHP Zip extension is not enabled.\n");
+}
+
 $backupDir = realpath($argv[1]);
 $outputDir = $argv[2];
 
