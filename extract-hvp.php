@@ -33,6 +33,10 @@ if (!is_dir($activitiesDir)) die("activities folder not found.\n");
 
 $filesXml = simplexml_load_file($filesXmlPath);
 
+if ($filesXml === false) {
+    die("Cannot parse files.xml.\n");
+}
+
 $mediaByItem = [];
 
 foreach ($filesXml->file as $file) {
@@ -61,7 +65,12 @@ $count = 0;
 
 foreach ($hvpXmlFiles as $hvpXmlFile) {
     $activity = simplexml_load_file($hvpXmlFile);
-    if (!$activity || !isset($activity->hvp)) continue;
+    if ($activity === false) {
+        echo "Skipping unreadable HVP activity XML: $hvpXmlFile\n";
+        continue;
+    }
+
+    if (!isset($activity->hvp)) continue;
 
     $hvp = $activity->hvp;
 
