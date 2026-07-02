@@ -27,7 +27,7 @@ $filesXmlPath = $backupDir . DIRECTORY_SEPARATOR . 'files.xml';
 $filesDir = $backupDir . DIRECTORY_SEPARATOR . 'files';
 $activitiesDir = $backupDir . DIRECTORY_SEPARATOR . 'activities';
 
-if (!file_exists($filesXmlPath)) die("files.xml not found.\n");
+if (!is_file($filesXmlPath)) die("files.xml not found.\n");
 if (!is_dir($filesDir)) die("files folder not found.\n");
 if (!is_dir($activitiesDir)) die("activities folder not found.\n");
 
@@ -129,9 +129,9 @@ if (json_last_error() !== JSON_ERROR_NONE) {
         $source1 = $filesDir . DIRECTORY_SEPARATOR . substr($hash, 0, 2) . DIRECTORY_SEPARATOR . $hash;
         $source2 = $filesDir . DIRECTORY_SEPARATOR . $hash;
 
-        if (file_exists($source1)) {
+        if (is_file($source1)) {
             $source = $source1;
-        } elseif (file_exists($source2)) {
+        } elseif (is_file($source2)) {
             $source = $source2;
         } else {
             echo "Missing media file for item $itemid: $hash\n";
