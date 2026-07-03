@@ -1,6 +1,6 @@
 <?php
 if ($argc < 3) {
-    die("Usage:\n  php extract-hvp.php <backup.mbz|extracted-folder> <output-folder>\n\nExamples:\n  php extract-hvp.php backup.mbz output\n  php extract-hvp.php extracted-backup output\n");
+    die("Usage:\n  php extract-hvp.php <backup.mbz> <output-folder> [--keeplibraries]\n\nExample:\n  php extract-hvp.php backup.mbz output --keeplibraries\n");
 }
 
 if (!class_exists('ZipArchive')) {
@@ -138,12 +138,306 @@ function findSingleNestedArchiveCandidate(string $directory): ?string
     return $candidates[0];
 }
 
+function getStoredMoodleFilePath(string $filesDir, string $contenthash): ?string
+{
+    $source1 = $filesDir . DIRECTORY_SEPARATOR . substr($contenthash, 0, 2) . DIRECTORY_SEPARATOR . $contenthash;
+    $source2 = $filesDir . DIRECTORY_SEPARATOR . $contenthash;
+
+    if (is_file($source1)) {
+        return $source1;
+    }
+
+    if (is_file($source2)) {
+        return $source2;
+    }
+
+    return null;
+}
+
+function getSafeOutputName(string $name, string $fallback): string
+{
+    $safeName = preg_replace('/[<>:"\/\\\\|?*]/', '_', $name);
+    $safeName = trim((string) $safeName);
+
+    if ($safeName === '') {
+        return $fallback;
+    }
+
+    return $safeName;
+}
+
+function getUniqueOutputPath(string $outputDir, string $safeTitle, array &$usedOutputNames): string
+{
+    $baseName = $safeTitle;
+    $suffix = 1;
+
+    do {
+        $fileName = $suffix === 1 ? $baseName . '.h5p' : $baseName . ' (' . $suffix . ').h5p';
+        $key = strtolower($fileName);
+        $target = $outputDir . DIRECTORY_SEPARATOR . $fileName;
+        $suffix++;
+    } while (isset($usedOutputNames[$key]) || file_exists($target));
+
+    $usedOutputNames[$key] = true;
+
+    return $target;
+}
+
+function loadContentBankNames(string $backupDir): array
+{
+    $contentBankPath = $backupDir . DIRECTORY_SEPARATOR . 'course' . DIRECTORY_SEPARATOR . 'contentbank.xml';
+
+    if (!is_file($contentBankPath)) {
+        return [];
+    }
+
+    $contentBankXml = simplexml_load_file($contentBankPath);
+
+    if ($contentBankXml === false) {
+        echo "Cannot parse content bank metadata: $contentBankPath\n";
+        return [];
+    }
+
+    $names = [];
+
+    foreach ($contentBankXml->content as $content) {
+        $id = (string) $content['id'];
+        $name = trim((string) $content->name);
+
+        if ($id !== '' && $name !== '') {
+            $names[$id] = $name;
+        }
+    }
+
+    return $names;
+}
+
+function splitHvpLibraryList(string $value): array
+{
+    $items = [];
+
+    foreach (explode(',', $value) as $item) {
+        $item = trim($item);
+
+        if ($item !== '') {
+            $items[] = ['path' => $item];
+        }
+    }
+
+    return $items;
+}
+
+function getHvpLibraryString(SimpleXMLElement $library, string $field): string
+{
+    $value = trim((string) $library->{$field});
+
+    if ($value === '$@NULL@$') {
+        return '';
+    }
+
+    return $value;
+}
+
+function getHvpLibraryJsonValue(SimpleXMLElement $library, string $field): mixed
+{
+    $value = getHvpLibraryString($library, $field);
+
+    if ($value === '') {
+        return null;
+    }
+
+    $decoded = json_decode($value);
+
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        return null;
+    }
+
+    return $decoded;
+}
+
+function loadHvpLibraryMetadata(string $backupDir): array
+{
+    $librariesPath = $backupDir . DIRECTORY_SEPARATOR . 'activities' . DIRECTORY_SEPARATOR . 'hvp_libraries.xml';
+
+    if (!is_file($librariesPath)) {
+        return [];
+    }
+
+    $librariesXml = simplexml_load_file($librariesPath);
+
+    if ($librariesXml === false) {
+        echo "Cannot parse HVP library metadata: $librariesPath\n";
+        return [];
+    }
+
+    $librariesById = [];
+    $metadata = [
+        'jsonByFolder' => [],
+        'folderByKey' => [],
+        'dependenciesByFolder' => [],
+    ];
+
+    foreach ($librariesXml->library as $library) {
+        $id = (string) $library['id'];
+        $machineName = (string) $library->machine_name;
+        $majorVersion = (int) $library->major_version;
+        $minorVersion = (int) $library->minor_version;
+
+        if ($id === '' || $machineName === '') {
+            continue;
+        }
+
+        $libraryJson = [
+            'title' => (string) $library->title,
+            'machineName' => $machineName,
+            'majorVersion' => $majorVersion,
+            'minorVersion' => $minorVersion,
+            'patchVersion' => (int) $library->patch_version,
+            'runnable' => (int) $library->runnable === 1,
+            'fullscreen' => (int) $library->fullscreen === 1,
+            'embedTypes' => array_values(array_filter(array_map('trim', explode(',', getHvpLibraryString($library, 'embed_types'))))),
+        ];
+
+        $preloadedJs = splitHvpLibraryList(getHvpLibraryString($library, 'preloaded_js'));
+        if ($preloadedJs !== []) {
+            $libraryJson['preloadedJs'] = $preloadedJs;
+        }
+
+        $preloadedCss = splitHvpLibraryList(getHvpLibraryString($library, 'preloaded_css'));
+        if ($preloadedCss !== []) {
+            $libraryJson['preloadedCss'] = $preloadedCss;
+        }
+
+        $dropLibraryCss = getHvpLibraryString($library, 'drop_library_css');
+        if ($dropLibraryCss !== '') {
+            $libraryJson['dropLibraryCss'] = $dropLibraryCss;
+        }
+
+        $semantics = getHvpLibraryJsonValue($library, 'semantics');
+        if ($semantics !== null) {
+            $libraryJson['semantics'] = $semantics;
+        }
+
+        $folder = $machineName . '-' . $majorVersion . '.' . $minorVersion;
+
+        $librariesById[$id] = [
+            'folder' => $folder,
+            'machineName' => $machineName,
+            'majorVersion' => $majorVersion,
+            'minorVersion' => $minorVersion,
+            'json' => $libraryJson,
+            'dependencies' => $library->dependencies->dependency ?? [],
+        ];
+        $metadata['folderByKey'][$folder] = $folder;
+    }
+
+    foreach ($librariesById as $id => $library) {
+        $dependencyGroups = [
+            'preloaded' => [],
+            'dynamic' => [],
+            'editor' => [],
+        ];
+
+        foreach ($library['dependencies'] as $dependency) {
+            $requiredLibraryId = (string) $dependency['required_library_id'];
+            $dependencyType = (string) $dependency->dependency_type;
+
+            if (!isset($librariesById[$requiredLibraryId]) || !isset($dependencyGroups[$dependencyType])) {
+                continue;
+            }
+
+            $requiredLibrary = $librariesById[$requiredLibraryId];
+            $dependencyGroups[$dependencyType][] = [
+                'machineName' => $requiredLibrary['machineName'],
+                'majorVersion' => $requiredLibrary['majorVersion'],
+                'minorVersion' => $requiredLibrary['minorVersion'],
+            ];
+        }
+
+        $libraryJson = $library['json'];
+
+        if ($dependencyGroups['preloaded'] !== []) {
+            $libraryJson['preloadedDependencies'] = $dependencyGroups['preloaded'];
+        }
+
+        if ($dependencyGroups['dynamic'] !== []) {
+            $libraryJson['dynamicDependencies'] = $dependencyGroups['dynamic'];
+        }
+
+        if ($dependencyGroups['editor'] !== []) {
+            $libraryJson['editorDependencies'] = $dependencyGroups['editor'];
+        }
+
+        $metadata['jsonByFolder'][$library['folder']] = $libraryJson;
+        $metadata['dependenciesByFolder'][$library['folder']] = [
+            'preloaded' => [],
+            'dynamic' => [],
+            'editor' => [],
+        ];
+
+        foreach ($library['dependencies'] as $dependency) {
+            $requiredLibraryId = (string) $dependency['required_library_id'];
+            $dependencyType = (string) $dependency->dependency_type;
+
+            if (!isset($librariesById[$requiredLibraryId]) || !isset($metadata['dependenciesByFolder'][$library['folder']][$dependencyType])) {
+                continue;
+            }
+
+            $metadata['dependenciesByFolder'][$library['folder']][$dependencyType][] = $librariesById[$requiredLibraryId]['folder'];
+        }
+    }
+
+    return $metadata;
+}
+
+function getHvpLibraryFoldersForContent(array $metadata, string $machineName, int $majorVersion, int $minorVersion): array
+{
+    if (!isset($metadata['jsonByFolder'], $metadata['dependenciesByFolder'])) {
+        return [];
+    }
+
+    $mainFolder = $machineName . '-' . $majorVersion . '.' . $minorVersion;
+
+    if (!isset($metadata['jsonByFolder'][$mainFolder])) {
+        return [];
+    }
+
+    $selected = [];
+    $stack = [$mainFolder];
+
+    while ($stack !== []) {
+        $folder = array_pop($stack);
+
+        if (isset($selected[$folder])) {
+            continue;
+        }
+
+        $selected[$folder] = true;
+
+        foreach (['preloaded', 'dynamic'] as $dependencyType) {
+            foreach ($metadata['dependenciesByFolder'][$folder][$dependencyType] ?? [] as $dependencyFolder) {
+                $stack[] = $dependencyFolder;
+            }
+        }
+    }
+
+    return array_keys($selected);
+}
+
 $inputPath = realpath($argv[1]);
 $outputDir = $argv[2];
+$keepLibraries = false;
 
-if ($inputPath !== false && is_dir($inputPath)) {
-    $backupDir = $inputPath;
-} elseif ($inputPath !== false && is_file($inputPath) && strtolower(pathinfo($inputPath, PATHINFO_EXTENSION)) === 'mbz') {
+foreach (array_slice($argv, 3) as $option) {
+    if ($option === '--keeplibraries' || $option === '--keep-libraries') {
+        $keepLibraries = true;
+        continue;
+    }
+
+    die("Unknown option: $option\n");
+}
+
+if ($inputPath !== false && is_file($inputPath) && strtolower(pathinfo($inputPath, PATHINFO_EXTENSION)) === 'mbz') {
     $temporaryBackupDir = createTemporaryBackupDirectory();
     register_shutdown_function('deleteTemporaryBackupDirectory', $temporaryBackupDir);
 
@@ -163,7 +457,7 @@ if ($inputPath !== false && is_dir($inputPath)) {
         die("files.xml not found in extracted MBZ backup.\n");
     }
 } else {
-    die("Backup folder not found.\n");
+    die("MBZ backup file not found.\n");
 }
 
 if (!is_dir($outputDir) && !mkdir($outputDir, 0777, true) && !is_dir($outputDir)) {
@@ -198,6 +492,12 @@ if ($filesXml === false) {
 }
 
 $mediaByItem = [];
+$contentBankNames = loadContentBankNames($backupDir);
+$hvpLibraryMetadata = $keepLibraries ? loadHvpLibraryMetadata($backupDir) : [];
+$hvpLibraryFilesByFolder = [];
+$h5pPackageFiles = [];
+$h5pPackageHashes = [];
+$usedOutputNames = [];
 
 foreach ($filesXml->file as $file) {
     $component = (string) $file->component;
@@ -208,15 +508,63 @@ foreach ($filesXml->file as $file) {
     $contenthash = (string) $file->contenthash;
     $filesize = (int) $file->filesize;
 
+    if ($filename === '.' || $filename === '' || $filesize === 0) {
+        continue;
+    }
+
+    if ($component === 'contentbank' && $filearea === 'public' && strtolower(pathinfo($filename, PATHINFO_EXTENSION)) === 'h5p') {
+        $packageFile = [
+            'title' => $contentBankNames[$itemid] ?? pathinfo($filename, PATHINFO_FILENAME),
+            'fallback' => "contentbank_item_$itemid",
+            'contenthash' => $contenthash,
+            'label' => 'content bank',
+        ];
+
+        if (isset($h5pPackageHashes[$contenthash])) {
+            $h5pPackageFiles[$h5pPackageHashes[$contenthash]] = $packageFile;
+        } else {
+            $h5pPackageHashes[$contenthash] = count($h5pPackageFiles);
+            $h5pPackageFiles[] = $packageFile;
+        }
+
+        continue;
+    }
+
+    if ($component === 'mod_h5pactivity' && $filearea === 'package' && strtolower(pathinfo($filename, PATHINFO_EXTENSION)) === 'h5p') {
+        if (isset($h5pPackageHashes[$contenthash])) {
+            continue;
+        }
+
+        $h5pPackageHashes[$contenthash] = count($h5pPackageFiles);
+        $h5pPackageFiles[] = [
+            'title' => pathinfo($filename, PATHINFO_FILENAME),
+            'fallback' => "h5pactivity_item_$itemid",
+            'contenthash' => $contenthash,
+            'label' => 'H5P activity',
+        ];
+        continue;
+    }
+
+    if ($keepLibraries && $component === 'mod_hvp' && $filearea === 'libraries') {
+        $internalPath = ltrim($filepath, '/\\') . $filename;
+        $internalPath = str_replace('\\', '/', $internalPath);
+        $libraryFolder = strtok($internalPath, '/');
+
+        if ($internalPath !== '' && $libraryFolder !== false) {
+            $hvpLibraryFilesByFolder[$libraryFolder][] = [
+                'contenthash' => $contenthash,
+                'internalPath' => $internalPath,
+            ];
+        }
+
+        continue;
+    }
+
     if ($component !== 'mod_hvp') {
         continue;
     }
 
     if ($filearea !== 'content') {
-        continue;
-    }
-
-    if ($filename === '.' || $filename === '' || $filesize === 0) {
         continue;
     }
 
@@ -261,13 +609,9 @@ foreach ($hvpXmlFiles as $hvpXmlFile) {
         continue;
     }
 
-    $safeTitle = preg_replace('/[<>:"\/\\\\|?*]/', '_', $title);
-    $safeTitle = trim($safeTitle);
-    if ($safeTitle === '') {
-        $safeTitle = "hvp_item_$itemid";
-    }
+    $safeTitle = getSafeOutputName($title, "hvp_item_$itemid");
 
-    $target = $outputDir . DIRECTORY_SEPARATOR . $safeTitle . ".h5p";
+    $target = getUniqueOutputPath($outputDir, $safeTitle, $usedOutputNames);
 
     $zip = new ZipArchive();
     if ($zip->open($target, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
@@ -310,19 +654,56 @@ foreach ($hvpXmlFiles as $hvpXmlFile) {
         continue;
     }
 
+    $hvpLibraryFolders = $keepLibraries
+        ? getHvpLibraryFoldersForContent($hvpLibraryMetadata, $machineName, $major, $minor)
+        : [];
+
+    foreach ($hvpLibraryFolders as $folder) {
+        $libraryJson = $hvpLibraryMetadata['jsonByFolder'][$folder] ?? null;
+
+        if ($libraryJson === null) {
+            continue;
+        }
+
+        $encodedLibraryJson = json_encode($libraryJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        if ($encodedLibraryJson === false) {
+            echo "Cannot encode library.json for $folder: " . json_last_error_msg() . "\n";
+            continue;
+        }
+
+        if (!$zip->addFromString($folder . '/library.json', $encodedLibraryJson)) {
+            echo "Cannot add library metadata to: $target ($folder)\n";
+        }
+    }
+
+    $addedLibraryFiles = 0;
+
+    foreach ($hvpLibraryFolders as $folder) {
+        foreach ($hvpLibraryFilesByFolder[$folder] ?? [] as $libraryFile) {
+            $source = getStoredMoodleFilePath($filesDir, $libraryFile['contenthash']);
+
+            if ($source === null) {
+                echo "Missing library file: {$libraryFile['contenthash']}\n";
+                continue;
+            }
+
+            if ($zip->addFile($source, $libraryFile['internalPath'])) {
+                $addedLibraryFiles++;
+            } else {
+                echo "Cannot add library file to: $target ({$libraryFile['internalPath']})\n";
+            }
+        }
+    }
+
     $addedMedia = 0;
 
     foreach ($mediaByItem[$itemid] ?? [] as $media) {
         $hash = $media['contenthash'];
 
-        $source1 = $filesDir . DIRECTORY_SEPARATOR . substr($hash, 0, 2) . DIRECTORY_SEPARATOR . $hash;
-        $source2 = $filesDir . DIRECTORY_SEPARATOR . $hash;
+        $source = getStoredMoodleFilePath($filesDir, $hash);
 
-        if (is_file($source1)) {
-            $source = $source1;
-        } elseif (is_file($source2)) {
-            $source = $source2;
-        } else {
+        if ($source === null) {
             echo "Missing media file for item $itemid: $hash\n";
             continue;
         }
@@ -342,8 +723,32 @@ foreach ($hvpXmlFiles as $hvpXmlFile) {
         continue;
     }
 
-    echo "Created OK: $target ($addedMedia media files)\n";
+    if ($keepLibraries) {
+        echo "Created OK: $target ($addedMedia media files, $addedLibraryFiles library files)\n";
+    } else {
+        echo "Created OK: $target ($addedMedia media files)\n";
+    }
     $count++;
 }
 
-echo "\nDone. Rebuilt $count H5P package(s).\n";
+foreach ($h5pPackageFiles as $packageFile) {
+    $source = getStoredMoodleFilePath($filesDir, $packageFile['contenthash']);
+
+    if ($source === null) {
+        echo "Missing {$packageFile['label']} package file: {$packageFile['contenthash']}\n";
+        continue;
+    }
+
+    $safeTitle = getSafeOutputName($packageFile['title'], $packageFile['fallback']);
+    $target = getUniqueOutputPath($outputDir, $safeTitle, $usedOutputNames);
+
+    if (!copy($source, $target)) {
+        echo "Cannot copy {$packageFile['label']} package to: $target\n";
+        continue;
+    }
+
+    echo "Copied OK: $target ({$packageFile['label']})\n";
+    $count++;
+}
+
+echo "\nDone. Extracted $count H5P package(s).\n";
