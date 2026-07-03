@@ -1,6 +1,6 @@
 <?php
 if ($argc < 3) {
-    die("Usage: php extract-hvp.php extracted_backup_folder_or_mbz_file output_folder\n");
+    die("Usage:\n  php extract-hvp.php <backup.mbz|extracted-folder> <output-folder>\n\nExamples:\n  php extract-hvp.php backup.mbz output\n  php extract-hvp.php extracted-backup output\n");
 }
 
 if (!class_exists('ZipArchive')) {
@@ -85,6 +85,59 @@ function extractArchiveWithSevenZip(string $archivePath, string $destinationDir)
     die("Make sure 7-Zip is installed and available in PATH.\n");
 }
 
+function isExtractedBackupDirectory(string $directory): bool
+{
+    return is_file($directory . DIRECTORY_SEPARATOR . 'files.xml')
+        && is_dir($directory . DIRECTORY_SEPARATOR . 'files')
+        && is_dir($directory . DIRECTORY_SEPARATOR . 'activities');
+}
+
+function findExtractedBackupDirectory(string $directory): ?string
+{
+    if (isExtractedBackupDirectory($directory)) {
+        return realpath($directory) ?: null;
+    }
+
+    $files = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    );
+
+    foreach ($files as $file) {
+        if (!$file->isDir() || $file->isLink()) {
+            continue;
+        }
+
+        $path = $file->getPathname();
+        if (isExtractedBackupDirectory($path)) {
+            return realpath($path) ?: null;
+        }
+    }
+
+    return null;
+}
+
+function findSingleNestedArchiveCandidate(string $directory): ?string
+{
+    $files = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS)
+    );
+
+    $candidates = [];
+
+    foreach ($files as $file) {
+        if ($file->isFile()) {
+            $candidates[] = $file->getPathname();
+        }
+    }
+
+    if (count($candidates) !== 1) {
+        return null;
+    }
+
+    return $candidates[0];
+}
+
 $inputPath = realpath($argv[1]);
 $outputDir = $argv[2];
 
@@ -97,15 +150,18 @@ if ($inputPath !== false && is_dir($inputPath)) {
     echo "Extracting MBZ backup to temporary folder...\n";
     extractArchiveWithSevenZip($inputPath, $temporaryBackupDir);
 
-    $filesXmlPath = $temporaryBackupDir . DIRECTORY_SEPARATOR . 'files.xml';
-    $tarFiles = glob($temporaryBackupDir . DIRECTORY_SEPARATOR . '*.tar') ?: [];
+    $backupDir = findExtractedBackupDirectory($temporaryBackupDir);
+    $nestedArchive = findSingleNestedArchiveCandidate($temporaryBackupDir);
 
-    if (!is_file($filesXmlPath) && count($tarFiles) === 1) {
-        echo "Extracting nested TAR archive from MBZ backup...\n";
-        extractArchiveWithSevenZip($tarFiles[0], $temporaryBackupDir);
+    if ($backupDir === null && $nestedArchive !== null) {
+        echo "Extracting nested archive from MBZ backup...\n";
+        extractArchiveWithSevenZip($nestedArchive, $temporaryBackupDir);
+        $backupDir = findExtractedBackupDirectory($temporaryBackupDir);
     }
 
-    $backupDir = realpath($temporaryBackupDir);
+    if ($backupDir === null) {
+        die("files.xml not found in extracted MBZ backup.\n");
+    }
 } else {
     die("Backup folder not found.\n");
 }
