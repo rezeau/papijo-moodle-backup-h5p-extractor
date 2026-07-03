@@ -1,16 +1,112 @@
 <?php
 if ($argc < 3) {
-    die("Usage: php extract-hvp.php extracted_backup_folder output_folder\n");
+    die("Usage: php extract-hvp.php extracted_backup_folder_or_mbz_file output_folder\n");
 }
 
 if (!class_exists('ZipArchive')) {
     die("PHP Zip extension is not enabled.\n");
 }
 
-$backupDir = realpath($argv[1]);
+function createTemporaryBackupDirectory(): string
+{
+    $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'extract-hvp-' . getmypid() . '-' . bin2hex(random_bytes(8));
+
+    if (!mkdir($tempDir, 0777, true) && !is_dir($tempDir)) {
+        die("Cannot create temporary folder.\n");
+    }
+
+    return $tempDir;
+}
+
+function deleteTemporaryBackupDirectory(string $directory): void
+{
+    $realDirectory = realpath($directory);
+    $realTempDir = realpath(sys_get_temp_dir());
+
+    if ($realDirectory === false || $realTempDir === false) {
+        return;
+    }
+
+    $expectedPrefix = $realTempDir . DIRECTORY_SEPARATOR;
+    if (!str_starts_with($realDirectory, $expectedPrefix) || !str_starts_with(basename($realDirectory), 'extract-hvp-')) {
+        return;
+    }
+
+    $files = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($realDirectory, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST
+    );
+
+    foreach ($files as $file) {
+        if ($file->isDir() && !$file->isLink()) {
+            rmdir($file->getPathname());
+        } else {
+            unlink($file->getPathname());
+        }
+    }
+
+    rmdir($realDirectory);
+}
+
+function extractArchiveWithSevenZip(string $archivePath, string $destinationDir): void
+{
+    $sevenZipExecutables = [
+        '7z',
+        '7za',
+        'C:\\Program Files\\7-Zip\\7z.exe',
+        'C:\\Program Files (x86)\\7-Zip\\7z.exe',
+    ];
+
+    $lastOutput = [];
+
+    foreach ($sevenZipExecutables as $executable) {
+        if (str_contains($executable, DIRECTORY_SEPARATOR) && !is_file($executable)) {
+            continue;
+        }
+
+        $command = escapeshellarg($executable)
+            . ' x -y -o' . escapeshellarg($destinationDir)
+            . ' ' . escapeshellarg($archivePath)
+            . ' 2>&1';
+
+        $output = [];
+        exec($command, $output, $exitCode);
+        $lastOutput = $output;
+
+        if ($exitCode === 0) {
+            return;
+        }
+    }
+
+    echo "Cannot extract archive with 7-Zip: $archivePath\n";
+    if ($lastOutput !== []) {
+        echo implode("\n", $lastOutput) . "\n";
+    }
+    die("Make sure 7-Zip is installed and available in PATH.\n");
+}
+
+$inputPath = realpath($argv[1]);
 $outputDir = $argv[2];
 
-if (!$backupDir || !is_dir($backupDir)) {
+if ($inputPath !== false && is_dir($inputPath)) {
+    $backupDir = $inputPath;
+} elseif ($inputPath !== false && is_file($inputPath) && strtolower(pathinfo($inputPath, PATHINFO_EXTENSION)) === 'mbz') {
+    $temporaryBackupDir = createTemporaryBackupDirectory();
+    register_shutdown_function('deleteTemporaryBackupDirectory', $temporaryBackupDir);
+
+    echo "Extracting MBZ backup to temporary folder...\n";
+    extractArchiveWithSevenZip($inputPath, $temporaryBackupDir);
+
+    $filesXmlPath = $temporaryBackupDir . DIRECTORY_SEPARATOR . 'files.xml';
+    $tarFiles = glob($temporaryBackupDir . DIRECTORY_SEPARATOR . '*.tar') ?: [];
+
+    if (!is_file($filesXmlPath) && count($tarFiles) === 1) {
+        echo "Extracting nested TAR archive from MBZ backup...\n";
+        extractArchiveWithSevenZip($tarFiles[0], $temporaryBackupDir);
+    }
+
+    $backupDir = realpath($temporaryBackupDir);
+} else {
     die("Backup folder not found.\n");
 }
 
