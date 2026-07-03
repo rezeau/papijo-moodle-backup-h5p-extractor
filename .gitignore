@@ -2,6 +2,16 @@
 temp/
 output/
 
+# Build artifacts
+build/
+dist/
+*.spec
+*.exe
+
+# Python
+__pycache__/
+*.pyc
+
 # Windows
 Thumbs.db
 Desktop.ini

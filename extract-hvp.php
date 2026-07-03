@@ -424,6 +424,73 @@ function getHvpLibraryFoldersForContent(array $metadata, string $machineName, in
     return array_keys($selected);
 }
 
+function isH5pLibraryArchivePath(string $internalPath): bool
+{
+    $normalizedPath = ltrim(str_replace('\\', '/', $internalPath), '/');
+    $firstSegment = strtok($normalizedPath, '/');
+
+    if ($firstSegment === false || $firstSegment === '' || $firstSegment === 'content' || $firstSegment === 'h5p.json') {
+        return false;
+    }
+
+    return preg_match('/^[A-Za-z0-9_.-]+-\d+\.\d+$/', $firstSegment) === 1;
+}
+
+function copyH5pPackageWithoutLibraries(string $source, string $target): bool
+{
+    $sourceZip = new ZipArchive();
+    if ($sourceZip->open($source) !== true) {
+        return false;
+    }
+
+    $targetZip = new ZipArchive();
+    if ($targetZip->open($target, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+        $sourceZip->close();
+        return false;
+    }
+
+    for ($index = 0; $index < $sourceZip->numFiles; $index++) {
+        $entry = $sourceZip->statIndex($index);
+
+        if ($entry === false || !isset($entry['name'])) {
+            continue;
+        }
+
+        $entryName = $entry['name'];
+
+        if (isH5pLibraryArchivePath($entryName)) {
+            continue;
+        }
+
+        if (str_ends_with($entryName, '/')) {
+            $targetZip->addEmptyDir(rtrim($entryName, '/'));
+            continue;
+        }
+
+        $stream = $sourceZip->getStream($entryName);
+
+        if ($stream === false) {
+            $targetZip->close();
+            $sourceZip->close();
+            return false;
+        }
+
+        $contents = stream_get_contents($stream);
+        fclose($stream);
+
+        if ($contents === false || !$targetZip->addFromString($entryName, $contents)) {
+            $targetZip->close();
+            $sourceZip->close();
+            return false;
+        }
+    }
+
+    $targetClosed = $targetZip->close();
+    $sourceZip->close();
+
+    return $targetClosed;
+}
+
 $inputPath = realpath($argv[1]);
 $outputDir = $argv[2];
 $keepLibraries = false;
@@ -546,6 +613,10 @@ foreach ($filesXml->file as $file) {
     }
 
     if ($keepLibraries && $component === 'mod_hvp' && $filearea === 'libraries') {
+        if (strtolower($filename) === 'library.json') {
+            continue;
+        }
+
         $internalPath = ltrim($filepath, '/\\') . $filename;
         $internalPath = str_replace('\\', '/', $internalPath);
         $libraryFolder = strtok($internalPath, '/');
@@ -742,12 +813,22 @@ foreach ($h5pPackageFiles as $packageFile) {
     $safeTitle = getSafeOutputName($packageFile['title'], $packageFile['fallback']);
     $target = getUniqueOutputPath($outputDir, $safeTitle, $usedOutputNames);
 
-    if (!copy($source, $target)) {
-        echo "Cannot copy {$packageFile['label']} package to: $target\n";
-        continue;
+    if ($keepLibraries) {
+        if (!copy($source, $target)) {
+            echo "Cannot copy {$packageFile['label']} package to: $target\n";
+            continue;
+        }
+
+        echo "Copied OK: $target ({$packageFile['label']})\n";
+    } else {
+        if (!copyH5pPackageWithoutLibraries($source, $target)) {
+            echo "Cannot rebuild {$packageFile['label']} package without libraries: $target\n";
+            continue;
+        }
+
+        echo "Created OK: $target ({$packageFile['label']}, without libraries)\n";
     }
 
-    echo "Copied OK: $target ({$packageFile['label']})\n";
     $count++;
 }
 
