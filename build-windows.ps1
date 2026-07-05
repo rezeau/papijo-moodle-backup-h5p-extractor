@@ -6,5 +6,5 @@ $python = if ($env:PYTHON) { $env:PYTHON } else { "python" }
     --onefile `
     --windowed `
     --clean `
-    --name Papi-Jo-Moodle-Backup-H5P-Extractor `
+    --name PapiJo-Moodle-Backup-H5P-Extractor `
     .\src\papijo_moodle_backup_h5p_extractor.py

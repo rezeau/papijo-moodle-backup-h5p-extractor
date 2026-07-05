@@ -51,5 +51,5 @@ Build:
 The standalone executable is created at:
 
 ```text
-dist\Papi-Jo-Moodle-Backup-H5P-Extractor.exe
+dist\PapiJo-Moodle-Backup-H5P-Extractor.exe
 ```
