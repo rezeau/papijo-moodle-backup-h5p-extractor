@@ -1,4 +1,4 @@
-# Extract HVP
+# Papi Jo Moodle Backup H5P Extractor
 
 A PHP utility that extracts standalone `.h5p` packages from Moodle course backups.
 
@@ -18,11 +18,11 @@ By default, recovered packages include content and media only. Use `--keeplibrar
 
 ```text
 Usage:
-  php extract-hvp.php <backup.mbz> <output-folder> [--keeplibraries]
+  php papijo-moodle-backup-h5p-extractor.php <backup.mbz> <output-folder> [--keeplibraries]
 
 Examples:
-  php extract-hvp.php backup.mbz output
-  php extract-hvp.php backup.mbz output --keeplibraries
+  php papijo-moodle-backup-h5p-extractor.php backup.mbz output
+  php papijo-moodle-backup-h5p-extractor.php backup.mbz output --keeplibraries
 ```
 
 ### Windows GUI
@@ -33,7 +33,7 @@ The Windows GUI lets end users choose:
 - the output folder
 - whether recovered packages should keep H5P libraries
 
-The GUI source is in `src/extract_hvp_gui.py`.
+The GUI source is in `src/papijo_moodle_backup_h5p_extractor.py`.
 
 ## Build Windows EXE
 
@@ -51,5 +51,5 @@ Build:
 The standalone executable is created at:
 
 ```text
-dist\Extract-HVP.exe
+dist\Papi-Jo-Moodle-Backup-H5P-Extractor.exe
 ```

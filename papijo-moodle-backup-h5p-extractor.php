@@ -1,6 +1,6 @@
 <?php
 if ($argc < 3) {
-    die("Usage:\n  php extract-hvp.php <backup.mbz> <output-folder> [--keeplibraries]\n\nExample:\n  php extract-hvp.php backup.mbz output --keeplibraries\n");
+    die("Usage:\n  php papijo-moodle-backup-h5p-extractor.php <backup.mbz> <output-folder> [--keeplibraries]\n\nExample:\n  php papijo-moodle-backup-h5p-extractor.php backup.mbz output --keeplibraries\n");
 }
 
 if (!class_exists('ZipArchive')) {
@@ -9,7 +9,7 @@ if (!class_exists('ZipArchive')) {
 
 function createTemporaryBackupDirectory(): string
 {
-    $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'extract-hvp-' . getmypid() . '-' . bin2hex(random_bytes(8));
+    $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'papijo-moodle-backup-h5p-extractor-' . getmypid() . '-' . bin2hex(random_bytes(8));
 
     if (!mkdir($tempDir, 0777, true) && !is_dir($tempDir)) {
         die("Cannot create temporary folder.\n");
@@ -28,7 +28,7 @@ function deleteTemporaryBackupDirectory(string $directory): void
     }
 
     $expectedPrefix = $realTempDir . DIRECTORY_SEPARATOR;
-    if (!str_starts_with($realDirectory, $expectedPrefix) || !str_starts_with(basename($realDirectory), 'extract-hvp-')) {
+    if (!str_starts_with($realDirectory, $expectedPrefix) || !str_starts_with(basename($realDirectory), 'papijo-moodle-backup-h5p-extractor-')) {
         return;
     }
 

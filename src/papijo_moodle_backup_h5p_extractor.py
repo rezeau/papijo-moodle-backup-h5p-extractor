@@ -590,7 +590,7 @@ def extract_hvp(input_path, output_dir, keep_libraries=False, log=None):
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="extract-hvp-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="papijo-moodle-backup-h5p-extractor-") as temp_dir:
         backup_dir = extract_mbz(input_path, Path(temp_dir), log)
 
         files_xml_path = backup_dir / "files.xml"
@@ -639,7 +639,7 @@ def extract_hvp(input_path, output_dir, keep_libraries=False, log=None):
 class ExtractHvpApp:
     def __init__(self):
         self.root = Tk()
-        self.root.title("Extract HVP")
+        self.root.title("Papi Jo Moodle Backup H5P Extractor")
         self.root.geometry("760x570")
         self.root.minsize(640, 480)
 
