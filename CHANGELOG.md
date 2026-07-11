@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 1.0.2
+
+- Add extraction progress feedback to the Windows interface.
+- Use native Windows-themed buttons matching the Papi Jo Windows H5P Converter.
+
 ## Version 1.0
 
 - Initial working version.

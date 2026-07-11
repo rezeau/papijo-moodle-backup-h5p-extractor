@@ -9,7 +9,7 @@ import threading
 import traceback
 import zipfile
 from pathlib import Path
-from tkinter import BooleanVar, Button, Checkbutton, END, Entry, Label, StringVar, Tk, filedialog, messagebox
+from tkinter import BooleanVar, Checkbutton, END, Entry, Label, StringVar, Tk, filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 import xml.etree.ElementTree as ET
 
@@ -451,11 +451,17 @@ def rebuild_legacy_hvp_packages(
     keep_libraries,
     used_output_names,
     log=None,
+    progress=None,
+    progress_offset=0,
+    progress_total=0,
 ):
     activities_dir = Path(backup_dir) / "activities"
     count = 0
 
-    for hvp_xml_file in activities_dir.glob("hvp_*/hvp.xml"):
+    hvp_xml_files = list(activities_dir.glob("hvp_*/hvp.xml"))
+    for index, hvp_xml_file in enumerate(hvp_xml_files):
+        if progress:
+            progress(progress_offset + index, progress_total)
         try:
             activity = ET.parse(hvp_xml_file).getroot()
         except ET.ParseError:
@@ -557,10 +563,22 @@ def rebuild_legacy_hvp_packages(
     return count
 
 
-def copy_packaged_h5p_files(files_dir, output_dir, h5p_package_files, keep_libraries, used_output_names, log=None):
+def copy_packaged_h5p_files(
+    files_dir,
+    output_dir,
+    h5p_package_files,
+    keep_libraries,
+    used_output_names,
+    log=None,
+    progress=None,
+    progress_offset=0,
+    progress_total=0,
+):
     count = 0
 
-    for package_file in h5p_package_files:
+    for index, package_file in enumerate(h5p_package_files):
+        if progress:
+            progress(progress_offset + index, progress_total)
         source = get_stored_moodle_file_path(files_dir, package_file["contenthash"])
         if source is None:
             log_line(log, f"Missing {package_file['label']} package file: {package_file['contenthash']}")
@@ -581,7 +599,7 @@ def copy_packaged_h5p_files(files_dir, output_dir, h5p_package_files, keep_libra
     return count
 
 
-def extract_hvp(input_path, output_dir, keep_libraries=False, log=None):
+def extract_hvp(input_path, output_dir, keep_libraries=False, log=None, progress=None):
     input_path = Path(input_path)
     output_dir = Path(output_dir)
 
@@ -611,6 +629,11 @@ def extract_hvp(input_path, output_dir, keep_libraries=False, log=None):
             log,
         )
 
+        legacy_package_count = sum(1 for _ in activities_dir.glob("hvp_*/hvp.xml"))
+        progress_total = legacy_package_count + len(h5p_package_files)
+        if progress:
+            progress(0, progress_total)
+
         used_output_names = set()
         count = rebuild_legacy_hvp_packages(
             backup_dir,
@@ -622,6 +645,9 @@ def extract_hvp(input_path, output_dir, keep_libraries=False, log=None):
             keep_libraries,
             used_output_names,
             log,
+            progress,
+            0,
+            progress_total,
         )
         count += copy_packaged_h5p_files(
             files_dir,
@@ -630,7 +656,13 @@ def extract_hvp(input_path, output_dir, keep_libraries=False, log=None):
             keep_libraries,
             used_output_names,
             log,
+            progress,
+            legacy_package_count,
+            progress_total,
         )
+
+        if progress:
+            progress(progress_total, progress_total)
 
     log_line(log, f"\nDone. Extracted {count} H5P package(s).")
     return count
@@ -662,11 +694,15 @@ class ExtractHvpApp:
 
         Label(self.root, text="Moodle backup (.mbz)").grid(row=1, column=0, sticky="w", padx=12, pady=(8, 4))
         Entry(self.root, textvariable=self.input_path).grid(row=2, column=0, sticky="ew", padx=12)
-        Button(self.root, text="Browse...", command=self.choose_input).grid(row=2, column=1, sticky="ew", padx=(0, 12))
+        ttk.Button(self.root, text="Browse...", command=self.choose_input).grid(
+            row=2, column=1, sticky="ew", padx=(0, 12)
+        )
 
         Label(self.root, text="Output folder").grid(row=3, column=0, sticky="w", padx=12, pady=(12, 4))
         Entry(self.root, textvariable=self.output_path).grid(row=4, column=0, sticky="ew", padx=12)
-        Button(self.root, text="Browse...", command=self.choose_output).grid(row=4, column=1, sticky="ew", padx=(0, 12))
+        ttk.Button(self.root, text="Browse...", command=self.choose_output).grid(
+            row=4, column=1, sticky="ew", padx=(0, 12)
+        )
 
         Checkbutton(
             self.root,
@@ -674,11 +710,14 @@ class ExtractHvpApp:
             variable=self.keep_libraries,
         ).grid(row=5, column=0, columnspan=2, sticky="w", padx=12, pady=12)
 
-        self.run_button = Button(self.root, text="Extract H5P packages", command=self.start_extract)
+        self.run_button = ttk.Button(self.root, text="Extract H5P packages", command=self.start_extract)
         self.run_button.grid(row=6, column=0, columnspan=2, sticky="ew", padx=12)
 
         self.log = ScrolledText(self.root, height=14, state="disabled")
         self.log.grid(row=7, column=0, columnspan=2, sticky="nsew", padx=12, pady=12)
+
+        self.progress = ttk.Progressbar(self.root, mode="determinate")
+        self.progress.grid(row=8, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 12))
 
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(7, weight=1)
@@ -708,6 +747,18 @@ class ExtractHvpApp:
     def set_running(self, running):
         self.running = running
         self.run_button.configure(state="disabled" if running else "normal")
+        if running:
+            self.progress.configure(mode="indeterminate", value=0)
+            self.progress.start(10)
+        else:
+            self.progress.stop()
+
+    def update_progress(self, completed, total):
+        def update():
+            self.progress.stop()
+            self.progress.configure(mode="determinate", maximum=max(total, 1), value=completed)
+
+        self.root.after(0, update)
 
     def start_extract(self):
         if self.running:
@@ -738,7 +789,13 @@ class ExtractHvpApp:
 
     def run_extract(self, input_path, output_path, keep_libraries):
         try:
-            count = extract_hvp(input_path, output_path, keep_libraries, self.append_log)
+            count = extract_hvp(
+                input_path,
+                output_path,
+                keep_libraries,
+                self.append_log,
+                self.update_progress,
+            )
         except Exception:
             details = traceback.format_exc()
             self.append_log(details)
